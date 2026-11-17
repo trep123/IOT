@@ -1,0 +1,12 @@
+services:
+  web:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: change-me
+      IOT_SIGN_KEY: change-me
+      IOT_PUBLIC_BASE_URL: http://localhost:8000
+    volumes: ["iot-data:/data"]
+volumes:
+  iot-data:
