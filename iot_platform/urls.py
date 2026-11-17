@@ -1,10 +1,10 @@
 from django.contrib import admin
-from django.urls import include, path
-from django.views.generic import TemplateView
+from django.urls import include, path, re_path
 from rest_framework.authtoken.views import obtain_auth_token
 from rest_framework.routers import DefaultRouter
 
 from audit.views import OperationLogViewSet
+from core.views import spa_index
 from control.views import CommandBatchViewSet, CommandTemplateViewSet, CommandViewSet
 from devices.views import DeviceGroupViewSet, DeviceStatusLogViewSet, DeviceViewSet
 from firmware.views import (DeviceUpgradeRecordViewSet, FirmwareVersionViewSet,
@@ -24,9 +24,10 @@ router.register("upgrade-records", DeviceUpgradeRecordViewSet, basename="upgrade
 router.register("operation-logs", OperationLogViewSet, basename="operation-log")
 
 urlpatterns = [
-    path("", TemplateView.as_view(template_name="index.html"), name="console"),
     path("admin/", admin.site.urls),
     path("api/auth/token/", obtain_auth_token, name="api-token"),
     path("api/auth/", include("rest_framework.urls")),
     path("api/", include(router.urls)),
+    # 管理端单页应用：除 API / Admin / 静态资源外的路径都交给前端路由
+    re_path(r"^(?!api/|admin/|static/|ws/).*$", spa_index, name="console"),
 ]

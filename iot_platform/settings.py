@@ -44,7 +44,7 @@ ROOT_URLCONF = "iot_platform.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
+        "DIRS": [],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -77,7 +77,12 @@ else:
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": os.getenv("IOT_SQLITE_PATH", str(DATA_DIR / "iot.sqlite3")),
             "ATOMIC_REQUESTS": True,
-            "OPTIONS": {"timeout": 30},
+            # IMMEDIATE 事务 + WAL：心跳、调度线程与 API 并发写入时避免 "database is locked"
+            "OPTIONS": {
+                "timeout": 30,
+                "transaction_mode": "IMMEDIATE",
+                "init_command": "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+            },
         }
     }
 
@@ -103,7 +108,9 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+# 管理端前端（frontend/，Vue 3 + Vite）构建产物，资源统一走 /static/
+FRONTEND_DIST = Path(os.getenv("IOT_FRONTEND_DIST", BASE_DIR / "frontend" / "dist"))
+STATICFILES_DIRS = [d for d in [BASE_DIR / "static", FRONTEND_DIST] if d.exists()]
 STATIC_ROOT = DATA_DIR / "staticfiles"
 MEDIA_ROOT = DATA_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

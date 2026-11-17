@@ -89,7 +89,7 @@ class UpgradeTaskSerializer(serializers.ModelSerializer):
         model = UpgradeTask
         fields = ["task_id", "version_id", "version_no", "task_type", "parent_task_id", "target_scope",
                   "gray_ratio", "gray_device_ids", "failure_threshold", "status", "status_display",
-                  "pause_reason", "excluded", "stats", "operator_id", "created_at", "updated_at", "finished_at"]
+                  "paused_from", "pause_reason", "excluded", "stats", "operator_id", "created_at", "updated_at", "finished_at"]
         read_only_fields = fields
 
     def get_stats(self, obj):

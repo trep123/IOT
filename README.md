@@ -7,7 +7,10 @@
 - REST API 全部采用标准 DRF 形式：`ModelViewSet` / `GenericViewSet` + `Serializer` + `DefaultRouter` + `@action`，
   统一分页 `{"count","next","previous","results"}`、`django-filter` 筛选、`search` / `ordering`、Token 认证。
 - 设备长连接与管理端实时推送使用 Channels（单机内存层，配置 `REDIS_URL` 即可多进程部署）。
-- 自带管理端页面（`/`）、Django Admin（`/admin/`）、可浏览 API（`/api/`）、设备模拟器与 22 个自动化测试。
+- 管理端前端：Vue 3 + Vite + Element Plus 单页应用（`frontend/`），实时推送驱动页面刷新，设计见 [docs/frontend.md](docs/frontend.md)。
+- 另有 Django Admin（`/admin/`）、可浏览 API（`/api/`）、设备模拟器与 25 个自动化测试。
+
+![运行总览](docs/screenshots/dashboard.png)
 
 ## 快速开始
 
@@ -15,6 +18,7 @@
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py init_demo            # 管理员 admin/admin123、10 台设备、指令模板、1.0.0 与 1.1.0 两个版本
+(cd frontend && npm install && npm run build)   # 构建管理端（需要 Node 18+）
 python -m daphne -b 0.0.0.0 -p 8000 iot_platform.asgi:application
 
 # 另开终端：模拟 init_demo 生成的全部设备（20% 指令失败率）
@@ -23,9 +27,19 @@ python simulator/device_sim.py --file data/demo_devices.json --fail-rate 0.2
 
 打开 <http://127.0.0.1:8000/> 用 `admin / admin123` 登录。演示路径：
 
+前端开发时可运行 `cd frontend && npm run dev`，访问 <http://localhost:5173>（自动代理 `/api` 与 `/ws`）。
+
 1. **设备在线管理**：设备上线后实时变绿；停止模拟器，约 90 秒（心跳 30s × 3）后判定离线，点「状态记录」查看原因与持续时长。
 2. **设备控制**：给 `dev-001` 下发「重启」（关键操作会弹出二次确认，并写入审计）；用「设备列表 / 分组 / 筛选条件」创建批次，观察并发下发与成功率，失败设备可一键重试。
 3. **版本管理**：版本 `1.1.0` 已可发布；新建升级任务（灰度 10%）→ 灰度完成后「推进全量」→ 全部完成；再对任务执行「回滚」到 `1.0.0`。
+
+## 界面
+
+| 升级任务（灰度 → 全量，逐台进度实时刷新） | 批次详情（并发下发、失败可重试） |
+|---|---|
+| ![升级任务](docs/screenshots/upgrade-task.png) | ![批次详情](docs/screenshots/batch-detail.png) |
+| **设备列表（组合筛选、在线统计）** | **关键指令（二次确认，结果实时回显）** |
+| ![设备列表](docs/screenshots/devices.png) | ![关键指令](docs/screenshots/critical-command.png) |
 
 ## 目录结构
 
@@ -36,10 +50,10 @@ devices/        设备档案、分组、在线状态判定、状态变更记录�
 control/        指令模板、单设备控制、批量控制（并发/离线策略/取消/重试）、超时
 firmware/       版本、升级包（SHA-256 + HMAC 签名）、升级任务（灰度/全量/熔断/回滚）、逐台升级记录
 audit/          操作审计
-templates/ static/   管理端页面（原生 JS）
+frontend/       管理端（Vue 3 + Vite + Element Plus），构建产物 frontend/dist 由 Django 提供
 simulator/      设备端模拟器（心跳 / 应答 / 升级代理）
 tests/          pytest（API、状态机、调度、WebSocket 端到端）
-docs/           设计文档、API 文档、设备通信协议
+docs/           设计文档、前端设计、API 文档、设备通信协议、界面截图
 ```
 
 ## 设计要点与实现对应
@@ -76,7 +90,8 @@ docs/           设计文档、API 文档、设备通信协议
 | `POSTGRES_DB` 等 | — | 设置后改用 PostgreSQL |
 | `REDIS_URL` | — | 设置后使用 Redis Channel Layer |
 | `DJANGO_SECRET_KEY` / `DJANGO_DEBUG` / `DJANGO_ALLOWED_HOSTS` | — | Django 基础配置 |
-| `IOT_SERVE_STATIC` | 1 | ASGI 进程直接提供静态资源 |
+| `IOT_SERVE_STATIC` | 1 | ASGI 进程直接提供静态资源（含前端构建产物） |
+| `IOT_FRONTEND_DIST` | frontend/dist | 前端构建产物目录 |
 
 ## 测试
 
@@ -88,4 +103,11 @@ python -m pytest -q
 批量并发补位/离线策略/取消/重试、升级包完整性、版本发布规则、下载鉴权、灰度→全量→完成、离线挂起续升、
 版本确认失败、失败率自动暂停/继续/重试、阶段超时、回滚、任务互斥，以及真实 WebSocket 端到端流程。
 
-更多：[API 文档](docs/api.md) · [设备通信协议](docs/protocol.md) · [设计文档](docs/design.md)
+更多：[前端设计](docs/frontend.md) · [API 文档](docs/api.md) · [设备通信协议](docs/protocol.md) · [设计文档](docs/design.md)
+
+## Docker
+
+```bash
+docker compose up --build    # 镜像构建时自动编译前端；访问 http://localhost:8000
+docker compose exec web python manage.py init_demo
+```
