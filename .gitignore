@@ -7,3 +7,7 @@ data/
 staticfiles/
 media/
 .env
+examples/device/c/mongoose.[ch]
+examples/device/c/device_client
+examples/device/cpp/build/
+examples/device/java/target/

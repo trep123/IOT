@@ -80,8 +80,18 @@ def test_package_download_requires_auth_or_device_secret(api, firmware_file, mak
     anon = APIClient()
     assert anon.get(f"/api/upgrade-packages/{pid}/download/").status_code in (401, 403)
     d, _ = make_device("d1")
-    r = anon.get(f"/api/upgrade-packages/{pid}/download/", {"device_id": "d1", "secret": d.secret})
+    # 未生成 Key 的设备不能下载
+    assert anon.get(f"/api/upgrade-packages/{pid}/download/", {"device_id": "d1", "secret": ""}).status_code in (401, 403)
+    key = api.post("/api/devices/d1/generate-key/").data["secret"]
+    r = anon.get(f"/api/upgrade-packages/{pid}/download/", {"device_id": "d1", "secret": key})
     assert r.status_code == 200 and b"".join(r.streaming_content) == b"fw-2.0.0"
+    # HMAC 签名方式（请求头）
+    import time
+    from devices.auth import compute_sign
+    ts, nonce = str(int(time.time())), "dlnonce001"
+    r = anon.get(f"/api/upgrade-packages/{pid}/download/", HTTP_X_DEVICE_ID="d1", HTTP_X_DEVICE_TS=ts,
+                 HTTP_X_DEVICE_NONCE=nonce, HTTP_X_DEVICE_SIGN=compute_sign(key, "d1", ts, nonce))
+    assert r.status_code == 200
 
 
 def test_gray_then_full_upgrade(api, firmware_file, make_device, outbox):

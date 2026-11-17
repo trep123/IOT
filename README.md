@@ -8,7 +8,9 @@
   统一分页 `{"count","next","previous","results"}`、`django-filter` 筛选、`search` / `ordering`、Token 认证。
 - 设备长连接与管理端实时推送使用 Channels（单机内存层，配置 `REDIS_URL` 即可多进程部署）。
 - 管理端前端：Vue 3 + Vite + Element Plus 单页应用（`frontend/`），实时推送驱动页面刷新，设计见 [docs/frontend.md](docs/frontend.md)。
-- 另有 Django Admin（`/admin/`）、可浏览 API（`/api/`）、设备模拟器与 25 个自动化测试。
+- 设备接入：管理员**手动生成接入 Key**（单台 / 批量），设备用 HMAC-SHA256 签名建连上线（Key 不上网），
+  支持重新生成、吊销与审计；管理端「帮助 → 设备接入指南」附 Python / C / C++ / Java 完整示例（`examples/device/`）。
+- 另有 Django Admin（`/admin/`）、可浏览 API（`/api/`）、设备模拟器与 29 个自动化测试。
 
 ![运行总览](docs/screenshots/dashboard.png)
 
@@ -40,6 +42,7 @@ python simulator/device_sim.py --file data/demo_devices.json --fail-rate 0.2
 | ![升级任务](docs/screenshots/upgrade-task.png) | ![批次详情](docs/screenshots/batch-detail.png) |
 | **设备列表（组合筛选、在线统计）** | **关键指令（二次确认，结果实时回显）** |
 | ![设备列表](docs/screenshots/devices.png) | ![关键指令](docs/screenshots/critical-command.png) |
+| ![接入 Key](docs/screenshots/device-key.png) | ![设备接入指南](docs/screenshots/help-device-access.png) |
 
 ## 目录结构
 
@@ -51,7 +54,8 @@ control/        指令模板、单设备控制、批量控制（并发/离线策
 firmware/       版本、升级包（SHA-256 + HMAC 签名）、升级任务（灰度/全量/熔断/回滚）、逐台升级记录
 audit/          操作审计
 frontend/       管理端（Vue 3 + Vite + Element Plus），构建产物 frontend/dist 由 Django 提供
-simulator/      设备端模拟器（心跳 / 应答 / 升级代理）
+simulator/      设备端模拟器（签名上线 / 心跳 / 应答 / 升级代理）
+examples/device/ 设备接入示例：Python、C（Mongoose）、C++（IXWebSocket）、Java（JDK WebSocket）
 tests/          pytest（API、状态机、调度、WebSocket 端到端）
 docs/           设计文档、前端设计、API 文档、设备通信协议、界面截图
 ```
@@ -60,6 +64,7 @@ docs/           设计文档、前端设计、API 文档、设备通信协议、
 
 | 设计要求 | 实现 |
 |---|---|
+| 设备接入鉴权 | `devices/auth.py`：接入 Key 由管理员手动生成（`generate-key` / `generate-keys`），HMAC 签名 + 时间戳 + nonce 防重放；失败先回 `auth_failed` 再以 44xx 关闭；生成 / 查看 / 吊销写审计 |
 | 心跳 + 连接事件判定在线 | `devices/services.py`：注册/心跳上线；调度扫描 `周期×N` 超时离线并踢掉连接；断开立即离线（以 `connection_id` 区分重连的旧连接） |
 | 状态变更留痕 | `DeviceStatusLog`：原因（主动上线/心跳恢复/主动断开/心跳超时）+ 上一状态持续时长 |
 | 在线管理是前置条件 | 单发离线时 `409` 或排队；批量离线按策略失败或排队；升级挂起，上线后自动续发 |
@@ -86,6 +91,8 @@ docs/           设计文档、前端设计、API 文档、设备通信协议、
 | `IOT_BATCH_CONCURRENCY` | 20 | 批量默认并发 |
 | `IOT_SIGN_KEY` | change-me-in-production | 升级包签名密钥 |
 | `IOT_PUBLIC_BASE_URL` | http://127.0.0.1:8000 | 下发给设备的升级包下载地址前缀 |
+| `IOT_DEVICE_AUTH_MAX_SKEW` | 300 | 设备签名时间戳允许偏差（秒） |
+| `IOT_DEVICE_AUTH_ALLOW_PLAIN` | 1 | 是否允许明文 Key（`?secret=`）接入，生产建议 0 |
 | `IOT_DATA_DIR` | ./data | SQLite 与升级包存储目录 |
 | `POSTGRES_DB` 等 | — | 设置后改用 PostgreSQL |
 | `REDIS_URL` | — | 设置后使用 Redis Channel Layer |

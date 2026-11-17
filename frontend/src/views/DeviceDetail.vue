@@ -5,16 +5,20 @@
         <div class="title">
           <div class="avatar" :class="dev.online_status"><el-icon><Cpu /></el-icon></div>
           <div>
-            <h2>{{ dev.name }} <DictTag :dict="ONLINE" :value="dev.online_status" size="default" dot /></h2>
+            <h2>{{ dev.name }} <DictTag :dict="ONLINE" :value="dev.online_status" size="default" dot />
+              <el-tag :type="dev.has_key ? 'success' : 'warning'" effect="plain" class="clickable" @click="keyOpen = true">{{ dev.has_key ? '接入 Key 已生成' : '未生成接入 Key' }}</el-tag></h2>
             <div class="muted"><span class="mono">{{ dev.device_id }}</span> · {{ dev.model }} · 版本 <span class="mono">{{ dev.current_version || '—' }}</span> · {{ dev.group_name || '未分组' }}</div>
           </div>
         </div>
         <div>
-          <el-button :icon="'Key'" @click="showSecret">接入密钥</el-button>
+          <el-button :icon="'QuestionFilled'" @click="$router.push({ path: '/help/device-access', query: { device: id } })">接入示例</el-button>
+          <el-button :icon="'Key'" :type="dev.has_key ? '' : 'warning'" @click="keyOpen = true">接入 Key</el-button>
           <el-button type="primary" :icon="'Promotion'" @click="cmdOpen = true">下发指令</el-button>
         </div>
       </div>
 
+      <el-alert v-if="!dev.has_key" type="warning" show-icon :closable="false"
+        title="该设备尚未生成接入 Key，无法上线。点击右上角「接入 Key」手动生成后烧录到设备。" />
       <div class="grid grid-4">
         <StatCard label="最近心跳" :value="fromNow(dev.last_heartbeat_at)" icon="Timer" :hint="fmtTime(dev.last_heartbeat_at)" />
         <StatCard label="最近上线" :value="fromNow(dev.last_online_at)" icon="CircleCheck" color="green" :hint="fmtTime(dev.last_online_at)" />
@@ -60,25 +64,13 @@
       </div>
     </template>
 
-    <el-dialog v-model="secretOpen" title="设备接入密钥" width="520px">
-      <el-descriptions :column="1" border>
-        <el-descriptions-item label="接入地址"><span class="mono">ws://&lt;host&gt;/ws/device/{{ id }}/?secret=…</span></el-descriptions-item>
-        <el-descriptions-item label="密钥"><span class="mono">{{ secret }}</span> <el-button link type="primary" @click="copy">复制</el-button></el-descriptions-item>
-      </el-descriptions>
-      <template #footer>
-        <el-popconfirm title="重置后旧密钥立即失效，设备需要用新密钥重新接入" width="260" @confirm="reset">
-          <template #reference><el-button type="danger" plain>重置密钥</el-button></template>
-        </el-popconfirm>
-        <el-button type="primary" @click="secretOpen = false">关闭</el-button>
-      </template>
-    </el-dialog>
+    <KeyDialog v-model="keyOpen" :device-id="id" @changed="loadDev" />
     <CommandDialog v-model="cmdOpen" :device-id="id" @sent="loadCmds" />
   </div>
 </template>
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { devices, commands, records } from '@/api'
 import { ONLINE, COMMAND, PHASE } from '@/utils/dict'
 import { fmtTime, fromNow, fmtDuration } from '@/utils/format'
@@ -87,6 +79,7 @@ import StatCard from '@/components/StatCard.vue'
 import DictTag from '@/components/DictTag.vue'
 import CommandDialog from '@/components/CommandDialog.vue'
 import UpgradeProgress from '@/components/UpgradeProgress.vue'
+import KeyDialog from '@/components/KeyDialog.vue'
 
 const id = useRoute().params.id
 const dev = ref(null)
@@ -95,8 +88,7 @@ const cmds = reactive({ rows: [], total: 0, page: 1, loading: false })
 const logs = reactive({ rows: [], total: 0, page: 1 })
 const ups = reactive({ rows: [] })
 const cmdOpen = ref(false)
-const secretOpen = ref(false)
-const secret = ref('')
+const keyOpen = ref(false)
 
 async function loadDev() { dev.value = await devices.get(id) }
 async function loadCmds() {
@@ -105,13 +97,10 @@ async function loadCmds() {
 }
 async function loadLogs() { const r = await devices.statusLogs(id, { page: logs.page, page_size: 10 }); logs.rows = r.results; logs.total = r.count }
 async function loadUps() { ups.rows = (await records.list({ device_id: id, page_size: 50, ordering: '-record_id' })).results }
-async function showSecret() { secret.value = (await devices.secret(id)).secret; secretOpen.value = true }
-async function reset() { secret.value = (await devices.resetSecret(id)).secret; ElMessage.success('密钥已重置') }
-function copy() { navigator.clipboard?.writeText(secret.value); ElMessage.success('已复制') }
 
 onMounted(() => Promise.all([loadDev(), loadCmds(), loadLogs(), loadUps()]))
 const mine = (d) => d.device_id === id
-useRealtimeRefresh(['device_status', 'device_version'], () => { loadDev(); loadLogs() }, { filter: mine, wait: 300 })
+useRealtimeRefresh(['device_status', 'device_version', 'device_key'], () => { loadDev(); loadLogs() }, { filter: mine, wait: 300 })
 useRealtimeRefresh(['command_update'], loadCmds, { filter: mine, wait: 300 })
 useRealtimeRefresh(['upgrade_record'], loadUps, { filter: mine, wait: 300 })
 </script>

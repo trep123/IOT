@@ -7,17 +7,20 @@ from devices.models import Device, DeviceStatusLog
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def test_create_device_returns_secret_and_standard_pagination(api):
+def test_create_device_without_key_and_standard_pagination(api):
     r = api.post("/api/devices/", {"device_id": "dev-1", "name": "一号", "model": "GW-100",
                                    "current_version": "1.0.0"}, format="json")
     assert r.status_code == 201, r.data
-    assert len(r.data["secret"]) == 32
+    assert r.data["secret"] is None and r.data["has_key"] is False  # Key 需手动生成
+    r2 = api.post("/api/devices/", {"device_id": "dev-2", "name": "二号", "model": "GW-100",
+                                    "generate_key": True}, format="json")
+    assert len(r2.data["secret"]) == 32 and r2.data["has_key"] is True
     assert r.data["online_status"] == "OFFLINE"
 
     r = api.get("/api/devices/")
     assert r.status_code == 200
     assert set(r.data) == {"count", "next", "previous", "results"}
-    assert "secret" not in r.data["results"][0]
+    assert all("secret" not in row for row in r.data["results"])
 
 
 def test_online_status_cannot_be_set_manually(api, make_device):

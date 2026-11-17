@@ -9,8 +9,15 @@ export default defineConfig(({ command }) => ({
   // 构建产物由 Django staticfiles 提供，统一挂在 /static/ 下
   base: command === 'build' ? '/static/' : '/',
   plugins: [vue()],
-  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // 设备接入示例源码（帮助页以 ?raw 方式引入，与仓库 examples/ 保持唯一来源）
+      '@examples': fileURLToPath(new URL('../examples/device', import.meta.url)),
+    },
+  },
   server: {
+    fs: { allow: ['..'] },
     host: '0.0.0.0',
     port: 5173,
     proxy: {

@@ -1,4 +1,4 @@
-import hmac
+import json
 import uuid
 from urllib.parse import parse_qs
 
@@ -9,22 +9,34 @@ from django.db import close_old_connections, transaction
 from core.realtime import device_group
 
 from . import gateway, services
+from .auth import DeviceAuthError, authenticate
 from .models import Device
 
 
 class DeviceGatewayConsumer(JsonWebsocketConsumer):
-    """设备长连接：ws/device/<device_id>/?secret=<设备密钥>。上行走 gateway，下行由 Channel Layer 投递。"""
+    """设备长连接：ws/device/<device_id>/?ts=&nonce=&sign=（鉴权见 devices/auth.py）。
+
+    鉴权失败时先完成握手，发送 {"type": "auth_failed", "code", "message"} 再以 code 关闭，
+    便于设备端定位原因（握手阶段直接拒绝只能得到 HTTP 403）。
+    """
 
     authed = False
+
+    @classmethod
+    def encode_json(cls, content):
+        # 中文按 UTF-8 原样发送：报文更短，嵌入式 JSON 库（如 Mongoose）也无需处理 \uXXXX 转义
+        return json.dumps(content, ensure_ascii=False, separators=(",", ":"))
 
     def connect(self):
         close_old_connections()
         self.device_id = self.scope["url_route"]["kwargs"]["device_id"]
-        qs = parse_qs(self.scope.get("query_string", b"").decode())
-        secret = (qs.get("secret") or [""])[0]
-        device = Device.objects.filter(pk=self.device_id).first()
-        if device is None or not hmac.compare_digest(device.secret, secret):
-            self.close(code=4401)
+        qs = {k: v[0] for k, v in parse_qs(self.scope.get("query_string", b"").decode()).items()}
+        try:
+            authenticate(self.device_id, qs)
+        except DeviceAuthError as e:
+            self.accept()
+            self.send_json({"type": "auth_failed", "code": e.code, "message": e.message})
+            self.close(code=e.code)
             return
         self.connection_id = uuid.uuid4().hex
         Device.objects.filter(pk=self.device_id).update(connection_id=self.connection_id)
@@ -36,6 +48,8 @@ class DeviceGatewayConsumer(JsonWebsocketConsumer):
         self.accept()
 
     def receive_json(self, content, **kwargs):
+        if not self.authed:
+            return
         if not isinstance(content, dict):
             self.send_json({"type": "error", "message": "消息必须是 JSON 对象"})
             return

@@ -25,6 +25,7 @@ const META = {
   batch_update: { label: '批量控制', type: 'warning' },
   task_update: { label: '升级任务', type: 'danger' },
   upgrade_record: { label: '升级进度', type: 'info' },
+  device_key: { label: '接入Key', type: 'warning' },
 }
 const meta = (e) => META[e.event] || { label: e.event, type: 'info' }
 
@@ -42,6 +43,8 @@ function describe({ event, data = {} }) {
       return `任务 #${data.task_id} ${TASK[data.status]?.label || data.status}，进度 ${Math.round((data.progress || 0) * 100)}%${data.pause_reason ? `，${data.pause_reason}` : ''}`
     case 'upgrade_record':
       return `${data.device_id} ${STAGE[data.stage]?.label || data.stage} ${data.progress ?? ''}%${data.error_msg ? `，${data.error_msg}` : ''}`
+    case 'device_key':
+      return `${data.device_id} ${data.has_key ? '已生成新的接入 Key' : '接入 Key 已吊销'}`
     default:
       return JSON.stringify(data).slice(0, 80)
   }

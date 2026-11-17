@@ -18,6 +18,8 @@ def _isolate(settings, tmp_path):
     settings.IOT = {**settings.IOT, "HEARTBEAT_INTERVAL": 10, "HEARTBEAT_MISS_COUNT": 3,
                     "DEFAULT_BATCH_CONCURRENCY": 2, "UPGRADE_STAGE_TIMEOUT": 600, "QUEUE_TTL": 3600}
     timeutil.reset()
+    from django.core.cache import cache
+    cache.clear()  # 清空 nonce 防重放缓存
     yield
     timeutil.reset()
 

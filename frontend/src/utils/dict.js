@@ -38,6 +38,7 @@ export const OP_TYPE = mk([
   ['UPGRADE_PROMOTE', '推进全量', 'primary'], ['UPGRADE_PAUSE', '暂停升级', 'warning'],
   ['UPGRADE_AUTO_PAUSE', '失败率超阈值自动暂停', 'danger'], ['UPGRADE_RESUME', '继续升级', 'success'],
   ['UPGRADE_RETRY', '重试失败设备', ''], ['ROLLBACK', '版本回滚', 'danger'],
+  ['KEY_GENERATE', '生成接入Key', 'warning'], ['KEY_REVOKE', '吊销接入Key', 'danger'], ['KEY_VIEW', '查看接入Key', 'info'],
 ])
 export const TARGET_TYPE = mk([
   ['DEVICE', '设备', ''], ['COMMAND', '指令', ''], ['BATCH', '批次', ''], ['VERSION', '版本', ''],

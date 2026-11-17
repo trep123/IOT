@@ -113,3 +113,33 @@ def scan_heartbeat_timeouts(now=None) -> int:
         if set_offline(device, DeviceStatusLog.Reason.HEARTBEAT_TIMEOUT, now, kick=True):
             count += 1
     return count
+
+
+# ---------------------------------------------------------------- 接入 Key（管理员手动生成）
+def generate_key(device: Device, operator: str = "system", now=None, regenerate_reason: str = "") -> str:
+    """生成 / 重新生成接入 Key。旧 Key 立即失效，已建立的连接被断开，设备需用新 Key 重新上线。"""
+    from audit.models import OperationLog, record
+
+    from .models import new_secret
+
+    had_key = bool(device.secret)
+    device.secret = new_secret()
+    device.secret_created_at = now or timeutil.now()
+    device.save(update_fields=["secret", "secret_created_at", "updated_at"])
+    realtime.kick_device(device.device_id)
+    record(operator, OperationLog.OpType.KEY_GENERATE, OperationLog.TargetType.DEVICE, device.device_id,
+           {"regenerate": had_key, **({"reason": regenerate_reason} if regenerate_reason else {})})
+    realtime.broadcast("device_key", {"device_id": device.device_id, "has_key": True})
+    return device.secret
+
+
+def revoke_key(device: Device, operator: str = "system") -> None:
+    """吊销接入 Key：设备立即下线且无法再上线，直到重新生成。"""
+    from audit.models import OperationLog, record
+
+    device.secret = ""
+    device.secret_created_at = None
+    device.save(update_fields=["secret", "secret_created_at", "updated_at"])
+    realtime.kick_device(device.device_id)
+    record(operator, OperationLog.OpType.KEY_REVOKE, OperationLog.TargetType.DEVICE, device.device_id)
+    realtime.broadcast("device_key", {"device_id": device.device_id, "has_key": False})

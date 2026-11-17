@@ -13,6 +13,8 @@ RUN npm config set registry ${NPM_REGISTRY} \
  && npm ci --include=dev --no-audit --no-fund \
  && test -f node_modules/vite/bin/vite.js || (echo "vite 未安装，请检查 npm 源：${NPM_REGISTRY}" && exit 1)
 COPY frontend/ ./
+# 帮助页「设备接入指南」以 ?raw 方式引入 ../examples/device 下的示例源码
+COPY examples/device/ /examples/device/
 # 直接用 node 调用 vite，不依赖 node_modules/.bin 软链接
 RUN NODE_ENV=production node node_modules/vite/bin/vite.js build
 

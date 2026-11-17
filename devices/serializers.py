@@ -17,12 +17,14 @@ class DeviceSerializer(serializers.ModelSerializer):
                                                   allow_null=True, required=False)
     group_name = serializers.CharField(source="group.name", read_only=True, default=None)
     online_status_display = serializers.CharField(source="get_online_status_display", read_only=True)
+    has_key = serializers.BooleanField(read_only=True)
+    key_created_at = serializers.DateTimeField(source="secret_created_at", read_only=True)
 
     class Meta:
         model = Device
         fields = ["device_id", "name", "model", "group_id", "group_name", "current_version",
-                  "online_status", "online_status_display", "last_heartbeat_at", "last_online_at",
-                  "last_offline_at", "created_at", "updated_at"]
+                  "online_status", "online_status_display", "has_key", "key_created_at",
+                  "last_heartbeat_at", "last_online_at", "last_offline_at", "created_at", "updated_at"]
         # 在线状态与时间由心跳/连接事件维护，不允许手工修改
         read_only_fields = ["online_status", "last_heartbeat_at", "last_online_at", "last_offline_at",
                             "created_at", "updated_at"]
@@ -34,17 +36,45 @@ class DeviceSerializer(serializers.ModelSerializer):
 
 
 class DeviceCreateSerializer(DeviceSerializer):
-    """创建时返回一次设备接入密钥。"""
-    secret = serializers.CharField(read_only=True)
+    """建档默认不生成接入 Key；generate_key=true 时同时生成，并在响应中返回一次。"""
+    generate_key = serializers.BooleanField(write_only=True, required=False, default=False)
+    secret = serializers.CharField(read_only=True, allow_null=True)
 
     class Meta(DeviceSerializer.Meta):
-        fields = DeviceSerializer.Meta.fields + ["secret"]
+        fields = DeviceSerializer.Meta.fields + ["generate_key", "secret"]
+
+    def create(self, validated_data):
+        generate = validated_data.pop("generate_key", False)
+        device = super().create(validated_data)
+        if generate:
+            from . import services
+            request = self.context.get("request")
+            services.generate_key(device, operator=getattr(getattr(request, "user", None), "username", "system"))
+        return device
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["secret"] = instance.secret or None
+        return data
 
 
 class DeviceSecretSerializer(serializers.ModelSerializer):
+    secret = serializers.CharField(allow_null=True)
+    key_created_at = serializers.DateTimeField(source="secret_created_at", read_only=True)
+
     class Meta:
         model = Device
-        fields = ["device_id", "secret"]
+        fields = ["device_id", "secret", "key_created_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["secret"] = instance.secret or None
+        return data
+
+
+class BatchKeySerializer(serializers.Serializer):
+    device_ids = serializers.ListField(child=serializers.CharField(), allow_empty=False, max_length=1000)
+    overwrite = serializers.BooleanField(default=False, help_text="已有 Key 的设备是否重新生成")
 
 
 class DeviceStatusLogSerializer(serializers.ModelSerializer):

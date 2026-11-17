@@ -156,4 +156,7 @@ IOT = {
     "DEFAULT_BATCH_CONCURRENCY": int(os.getenv("IOT_BATCH_CONCURRENCY", "20")),
     # 下发给设备的升级包下载地址前缀
     "PUBLIC_BASE_URL": os.getenv("IOT_PUBLIC_BASE_URL", "http://127.0.0.1:8000"),
+    # 设备接入鉴权：签名时间戳允许的最大偏差（秒）；是否允许明文 Key（secret=）方式，生产建议关闭
+    "DEVICE_AUTH_MAX_SKEW": int(os.getenv("IOT_DEVICE_AUTH_MAX_SKEW", "300")),
+    "DEVICE_AUTH_ALLOW_PLAIN": os.getenv("IOT_DEVICE_AUTH_ALLOW_PLAIN", "1") == "1",
 }

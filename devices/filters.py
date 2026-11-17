@@ -14,6 +14,10 @@ class DeviceFilter(django_filters.FilterSet):
     created_after = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="gte")
     created_before = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="lte")
     device_id__in = django_filters.BaseInFilter(field_name="device_id")
+    has_key = django_filters.BooleanFilter(method="filter_has_key")
+
+    def filter_has_key(self, qs, name, value):
+        return qs.exclude(secret="") if value else qs.filter(secret="")
 
     class Meta:
         model = Device

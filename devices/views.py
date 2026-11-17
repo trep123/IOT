@@ -1,14 +1,18 @@
+from django.db import transaction
 from django.db.models import Count
-from rest_framework import mixins, status, viewsets
+from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from core.utils import csv_response
 
 from .filters import DeviceFilter, DeviceStatusLogFilter
-from .models import Device, DeviceGroup, DeviceStatusLog, new_secret
-from .serializers import (DeviceCreateSerializer, DeviceGroupSerializer, DeviceSecretSerializer,
-                          DeviceSerializer, DeviceStatusLogSerializer)
+from audit.models import OperationLog, record
+
+from . import services
+from .models import Device, DeviceGroup, DeviceStatusLog
+from .serializers import (BatchKeySerializer, DeviceCreateSerializer, DeviceGroupSerializer,
+                          DeviceSecretSerializer, DeviceSerializer, DeviceStatusLogSerializer)
 
 
 class DeviceGroupViewSet(viewsets.ModelViewSet):
@@ -29,8 +33,10 @@ class DeviceViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action == "create":
             return DeviceCreateSerializer
-        if self.action in ("secret", "reset_secret"):
+        if self.action in ("secret", "generate_key", "revoke_key"):
             return DeviceSecretSerializer
+        if self.action == "generate_keys":
+            return BatchKeySerializer
         if self.action == "status_logs":
             return DeviceStatusLogSerializer
         return DeviceSerializer
@@ -42,16 +48,51 @@ class DeviceViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(qs)
         return self.get_paginated_response(DeviceStatusLogSerializer(page, many=True).data)
 
+    # ---------------- 接入 Key：管理员手动生成，设备凭 Key 签名上线 ----------------
     @action(detail=True, methods=["get"])
     def secret(self, request, pk=None):
-        return Response(DeviceSecretSerializer(self.get_object()).data)
-
-    @action(detail=True, methods=["post"], url_path="reset-secret")
-    def reset_secret(self, request, pk=None):
+        """查看接入 Key（记审计）。未生成时 secret 为 null。"""
         device = self.get_object()
-        device.secret = new_secret()
-        device.save(update_fields=["secret", "updated_at"])
-        return Response(DeviceSecretSerializer(device).data, status=status.HTTP_200_OK)
+        if device.secret:
+            record(request.user.username, OperationLog.OpType.KEY_VIEW, OperationLog.TargetType.DEVICE,
+                   device.device_id)
+        return Response(DeviceSecretSerializer(device).data)
+
+    @action(detail=True, methods=["post"], url_path="generate-key")
+    def generate_key(self, request, pk=None):
+        """生成 / 重新生成接入 Key：旧 Key 立即失效并断开当前连接。"""
+        with transaction.atomic():
+            device = Device.objects.select_for_update().get(pk=self.get_object().pk)
+            services.generate_key(device, request.user.username)
+        return Response(DeviceSecretSerializer(device).data)
+
+    @action(detail=True, methods=["post"], url_path="revoke-key")
+    def revoke_key(self, request, pk=None):
+        """吊销接入 Key：设备立即下线，重新生成前无法上线。"""
+        with transaction.atomic():
+            device = Device.objects.select_for_update().get(pk=self.get_object().pk)
+            services.revoke_key(device, request.user.username)
+        return Response(DeviceSecretSerializer(device).data)
+
+    @action(detail=False, methods=["post"], url_path="generate-keys")
+    def generate_keys(self, request):
+        """批量生成接入 Key（量产烧录）。默认跳过已有 Key 的设备，overwrite=true 时重新生成。"""
+        ser = BatchKeySerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        ids = list(dict.fromkeys(ser.validated_data["device_ids"]))
+        generated, skipped = [], []
+        with transaction.atomic():
+            devices = {d.device_id: d for d in Device.objects.select_for_update().filter(device_id__in=ids)}
+            for did in ids:
+                d = devices.get(did)
+                if d is None:
+                    skipped.append({"device_id": did, "reason": "设备不存在"})
+                elif d.secret and not ser.validated_data["overwrite"]:
+                    skipped.append({"device_id": did, "reason": "已有 Key"})
+                else:
+                    services.generate_key(d, request.user.username)
+                    generated.append({"device_id": did, "name": d.name, "secret": d.secret})
+        return Response({"generated": generated, "skipped": skipped})
 
     @action(detail=False, methods=["get"])
     def summary(self, request):

@@ -23,6 +23,9 @@ class OperationLog(models.Model):
         UPGRADE_RESUME = "UPGRADE_RESUME", "继续升级"
         UPGRADE_RETRY = "UPGRADE_RETRY", "重试失败设备"
         ROLLBACK = "ROLLBACK", "版本回滚"
+        KEY_GENERATE = "KEY_GENERATE", "生成接入Key"
+        KEY_REVOKE = "KEY_REVOKE", "吊销接入Key"
+        KEY_VIEW = "KEY_VIEW", "查看接入Key"
 
     class TargetType(models.TextChoices):
         DEVICE = "DEVICE"

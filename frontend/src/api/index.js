@@ -41,7 +41,9 @@ export const devices = {
   remove: (id) => d(`devices/${encodeURIComponent(id)}/`),
   summary: (q) => g('devices/summary/', q),
   secret: (id) => g(`devices/${encodeURIComponent(id)}/secret/`),
-  resetSecret: (id) => p(`devices/${encodeURIComponent(id)}/reset-secret/`),
+  generateKey: (id) => p(`devices/${encodeURIComponent(id)}/generate-key/`),
+  revokeKey: (id) => p(`devices/${encodeURIComponent(id)}/revoke-key/`),
+  generateKeys: (deviceIds, overwrite = false) => p('devices/generate-keys/', { device_ids: deviceIds, overwrite }),
   statusLogs: (id, q) => g(`devices/${encodeURIComponent(id)}/status-logs/`, q),
   export: (q) => download('devices/export/', clean(q), 'devices.csv'),
 }

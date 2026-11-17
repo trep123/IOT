@@ -13,12 +13,14 @@ pytestmark = pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 async def test_device_websocket_flow(user):
     d = await sync_to_async(Device.objects.create)(device_id="ws-1", name="ws", model="GW-100",
-                                                    current_version="1.0.0")
+                                                    current_version="1.0.0", secret="k" * 32)
     tpl = await sync_to_async(CommandTemplate.objects.create)(code="PING", name="ping", applicable_models=["*"])
 
     bad = WebsocketCommunicator(application, "/ws/device/ws-1/?secret=wrong")
-    connected, code = await bad.connect()
-    assert not connected
+    await bad.connect()
+    msg = await bad.receive_json_from(timeout=3)
+    assert msg["type"] == "auth_failed" and msg["code"] == 4401
+    assert (await bad.receive_output(timeout=3))["code"] == 4401
 
     ws = WebsocketCommunicator(application, f"/ws/device/ws-1/?secret={d.secret}")
     connected, _ = await ws.connect()

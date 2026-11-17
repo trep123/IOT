@@ -9,6 +9,7 @@ device_id_validator = RegexValidator(r"^[A-Za-z0-9_.\-]{1,64}$", "设备编号�
 
 
 def new_secret() -> str:
+    """设备接入 Key：32 位十六进制，由管理员手动生成。"""
     return secrets.token_hex(16)
 
 
@@ -43,8 +44,9 @@ class Device(models.Model):
     last_heartbeat_at = models.DateTimeField(null=True, blank=True)
     last_online_at = models.DateTimeField(null=True, blank=True)
     last_offline_at = models.DateTimeField(null=True, blank=True)
-    # 设备接入鉴权密钥
-    secret = models.CharField(max_length=64, default=new_secret)
+    # 设备接入 Key（管理员手动生成；为空表示未生成，设备无法上线）
+    secret = models.CharField(max_length=64, blank=True, default="")
+    secret_created_at = models.DateTimeField(null=True, blank=True)
     # 当前有效连接标识，用于区分重连时旧连接的断开事件
     connection_id = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(default=timeutil.now)
@@ -55,6 +57,10 @@ class Device(models.Model):
 
     def __str__(self):
         return f"{self.device_id}({self.name})"
+
+    @property
+    def has_key(self) -> bool:
+        return bool(self.secret)
 
     @property
     def is_online(self) -> bool:

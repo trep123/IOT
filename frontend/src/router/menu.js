@@ -22,4 +22,9 @@ export const menu = [
     ],
   },
   { path: '/audit', title: '操作审计', icon: 'Document', component: () => import('@/views/Audit.vue') },
+  {
+    title: '帮助', icon: 'QuestionFilled', children: [
+      { path: '/help/device-access', title: '设备接入指南', component: () => import('@/views/help/DeviceAccess.vue') },
+    ],
+  },
 ]

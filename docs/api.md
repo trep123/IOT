@@ -12,11 +12,13 @@
 |---|---|---|
 | GET/POST | `/api/groups/` | 分组列表 / 新建 |
 | GET/PUT/PATCH/DELETE | `/api/groups/{id}/` | 分组详情 |
-| GET/POST | `/api/devices/` | 设备列表 / 建档（响应含一次性 `secret`） |
+| GET/POST | `/api/devices/` | 设备列表（支持 `has_key=true/false` 筛选）/ 建档（默认不生成 Key；`generate_key=true` 时同时生成并返回 `secret`） |
 | GET/PUT/PATCH/DELETE | `/api/devices/{device_id}/` | 设备档案；`online_status` 等由心跳维护，只读 |
 | GET | `/api/devices/{device_id}/status-logs/` | 该设备的状态变更记录 |
-| GET | `/api/devices/{device_id}/secret/` | 查看接入密钥 |
-| POST | `/api/devices/{device_id}/reset-secret/` | 重置接入密钥 |
+| GET | `/api/devices/{device_id}/secret/` | 查看接入 Key（未生成时 `secret: null`；记审计 `KEY_VIEW`） |
+| POST | `/api/devices/{device_id}/generate-key/` | 手动生成 / 重新生成接入 Key（旧 Key 失效并断开连接） |
+| POST | `/api/devices/{device_id}/revoke-key/` | 吊销接入 Key（设备下线且无法再上线） |
+| POST | `/api/devices/generate-keys/` | 批量生成：`{"device_ids": [...], "overwrite": false}` → `{generated: [{device_id, name, secret}], skipped: [{device_id, reason}]}` |
 | GET | `/api/devices/summary/` | 在线/离线、型号、版本统计（支持同样的筛选参数） |
 | GET | `/api/devices/export/` | 按筛选条件导出 CSV |
 | GET | `/api/status-logs/` | 全部状态变更记录；`/api/status-logs/export/` 导出 |
@@ -53,7 +55,7 @@
 | POST | `/api/upgrade-packages/` | multipart 上传：`version_id`、`package_type`(FULL/DIFF)、`base_version`(差分必填)、`file`、可选 `checksum`（不一致则拒绝） |
 | GET/DELETE | `/api/upgrade-packages/`、`/{id}/` | 平台自动计算 SHA-256、大小，并以 HMAC-SHA256 签名 |
 | POST | `/api/upgrade-packages/{id}/verify/` | 重新校验文件完整性与签名 |
-| GET | `/api/upgrade-packages/{id}/download/` | 下载（管理端 Token 或设备 `device_id`+`secret`） |
+| GET | `/api/upgrade-packages/{id}/download/` | 下载（管理端 Token，或设备 `device_id` + `ts`/`nonce`/`sign` 签名，兼容 `secret`） |
 | POST | `/api/upgrade-tasks/` | 创建任务：`version_id`、`target_scope`、`gray_ratio`、`gray_device_ids`、`failure_threshold`、`start` |
 | GET | `/api/upgrade-tasks/`、`/{id}/` | 含 `stats`（总数、成功、失败、阶段分布、灰度统计、失败率）与 `excluded`（自动排除的设备及原因） |
 | GET | `/api/upgrade-tasks/{id}/records/` | 逐台升级记录 |

@@ -16,7 +16,7 @@ from firmware.models import FirmwareVersion
 
 
 class Command(BaseCommand):
-    help = "初始化演示数据：管理员、分组、设备、指令模板、两个固件版本，并导出设备密钥供模拟器使用"
+    help = "初始化演示数据：管理员、分组、设备、指令模板、两个固件版本，为演示设备生成接入 Key 并导出供模拟器使用"
 
     def add_arguments(self, parser):
         parser.add_argument("--devices", type=int, default=10)
@@ -65,6 +65,12 @@ class Command(BaseCommand):
                 f = ContentFile(f"demo firmware {no}\n".encode() * 1024, name=f"firmware-{no}.bin")
                 fw.create_package(v, f, "FULL", "", "", "admin")
                 fw.publish_version(v, "admin")
+
+        # 演示环境：为还没有接入 Key 的设备生成 Key（生产环境由管理员在管理端手动生成）
+        from devices import services as device_services
+        for d in devices:
+            if not d.secret:
+                device_services.generate_key(d, "init_demo")
 
         out = Path(settings.DATA_DIR) / "demo_devices.json"
         out.parent.mkdir(parents=True, exist_ok=True)

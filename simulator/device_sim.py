@@ -7,8 +7,11 @@
 import argparse
 import asyncio
 import hashlib
+import hmac
 import json
 import random
+import secrets
+import time
 import urllib.parse
 import urllib.request
 
@@ -24,10 +27,18 @@ class SimDevice:
     def log(self, *a):
         print(f"[{self.device_id} v{self.version}]", *a, flush=True)
 
+    def auth_params(self) -> dict:
+        """HMAC-SHA256 签名鉴权：Key 不在网络上传输；--plain 时使用明文 Key。"""
+        if self.args.plain:
+            return {"secret": self.secret}
+        ts, nonce = str(int(time.time())), secrets.token_hex(8)
+        sign = hmac.new(self.secret.encode(), f"{self.device_id}\n{ts}\n{nonce}".encode(), hashlib.sha256).hexdigest()
+        return {"ts": ts, "nonce": nonce, "sign": sign}
+
     @property
     def ws_url(self):
         base = self.args.server.replace("http://", "ws://").replace("https://", "wss://").rstrip("/")
-        return f"{base}/ws/device/{self.device_id}/?secret={urllib.parse.quote(self.secret)}"
+        return f"{base}/ws/device/{self.device_id}/?{urllib.parse.urlencode(self.auth_params())}"
 
     async def send(self, **msg):
         await self.ws.send(json.dumps(msg, ensure_ascii=False))
@@ -56,6 +67,9 @@ class SimDevice:
             await self.send(type="heartbeat")
 
     async def on_message(self, msg):
+        if msg.get("type") == "auth_failed":
+            self.log(f"鉴权失败（{msg.get('code')}）：{msg.get('message')}")
+            return
         if msg.get("type") == "registered":
             self.log("已上线")
             return
@@ -80,7 +94,7 @@ class SimDevice:
         self.log(f"开始升级 → {p['version_no']}（{pkg['type']}）")
         try:
             await self.send(type="upgrade_progress", record_id=rid, stage="DOWNLOADING", progress=0)
-            q = urllib.parse.urlencode({"device_id": self.device_id, "secret": self.secret})
+            q = urllib.parse.urlencode({"device_id": self.device_id, **self.auth_params()})
             data = await asyncio.to_thread(lambda: urllib.request.urlopen(f"{pkg['url']}?{q}", timeout=30).read())
             await self.send(type="upgrade_progress", record_id=rid, stage="DOWNLOADING", progress=100)
             await self.send(type="upgrade_progress", record_id=rid, stage="VERIFYING")
@@ -108,6 +122,7 @@ async def main():
     ap.add_argument("--file", help="init_demo 导出的设备列表 JSON")
     ap.add_argument("--device", action="append", default=[], help="id:secret[:version]")
     ap.add_argument("--heartbeat", type=float, default=10)
+    ap.add_argument("--plain", action="store_true", help="使用明文 Key（secret=）而非 HMAC 签名")
     ap.add_argument("--reconnect", type=float, default=2)
     ap.add_argument("--fail-rate", type=float, default=0.0)
     ap.add_argument("--upgrade-fail-rate", type=float, default=0.0)
