@@ -200,6 +200,14 @@ write_env() {
   ADMIN_PASSWORD="$adminpwd"
 
   local pip_index="https://pypi.org/simple" npm_reg="https://registry.npmjs.org"
+  if [[ "$USE_CN" == 0 && "$(env_get PIP_INDEX_URL)" == *tsinghua* ]]; then USE_CN=1; fi
+  if [[ "$USE_CN" == 0 ]]; then   # 官方源 6 秒内拿不到响应就自动切换国内源
+    if ! curl -fsS -o /dev/null -m 6 https://pypi.org/simple/pip/ 2>/dev/null \
+       || ! curl -fsS -o /dev/null -m 6 https://registry.npmjs.org/vite 2>/dev/null; then
+      warn "官方 pip / npm 源访问缓慢，自动改用国内源（清华 PyPI、npmmirror）"
+      USE_CN=1
+    fi
+  fi
   if [[ "$USE_CN" == 1 ]]; then
     pip_index="https://pypi.tuna.tsinghua.edu.cn/simple"
     npm_reg="https://registry.npmmirror.com"

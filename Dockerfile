@@ -7,9 +7,14 @@ FROM ${NODE_IMAGE} AS frontend
 ARG NPM_REGISTRY=https://registry.npmjs.org
 WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm config set registry ${NPM_REGISTRY} && npm ci --no-audit --no-fund
+# 构建阶段需要 devDependencies（vite、@vitejs/plugin-vue）：--include=dev 确保即使构建环境
+# 设置了 NODE_ENV=production / omit=dev 也会安装 vite
+RUN npm config set registry ${NPM_REGISTRY} \
+ && npm ci --include=dev --no-audit --no-fund \
+ && test -f node_modules/vite/bin/vite.js || (echo "vite 未安装，请检查 npm 源：${NPM_REGISTRY}" && exit 1)
 COPY frontend/ ./
-RUN npm run build
+# 直接用 node 调用 vite，不依赖 node_modules/.bin 软链接
+RUN NODE_ENV=production node node_modules/vite/bin/vite.js build
 
 # 2) 后端：一个 daphne 进程同时提供 REST API、WebSocket、管理端页面与内置调度器
 FROM ${PY_IMAGE}
