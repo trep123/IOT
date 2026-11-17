@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from core.versioning import vtuple
 
-from . import services
+from . import services, storage
 from .models import DeviceUpgradeRecord, FirmwareVersion, UpgradePackage, UpgradeTask
 
 
@@ -13,12 +13,16 @@ class UpgradePackageSerializer(serializers.ModelSerializer):
     checksum = serializers.CharField(required=False, allow_blank=True, max_length=64,
                                      help_text="可选：客户端计算的 SHA-256，用于完整性校验")
     download_url = serializers.SerializerMethodField()
+    storage_location = serializers.SerializerMethodField(help_text="文件存放位置，如 minio://iot/packages/1.2.0/xxx.bin")
 
     class Meta:
         model = UpgradePackage
         fields = ["package_id", "version_id", "version_no", "package_type", "base_version", "file", "file_name",
-                  "size", "checksum", "signature", "verified", "download_url", "created_at"]
+                  "size", "checksum", "signature", "verified", "storage_location", "download_url", "created_at"]
         read_only_fields = ["package_id", "file_name", "size", "signature", "verified", "created_at"]
+
+    def get_storage_location(self, obj):
+        return storage.location(obj.file_ref.name)
 
     def get_download_url(self, obj):
         request = self.context.get("request")

@@ -117,6 +117,45 @@ FRONTEND_DIST = Path(os.getenv("IOT_FRONTEND_DIST", BASE_DIR / "frontend" / "dis
 STATICFILES_DIRS = [d for d in [BASE_DIR / "static", FRONTEND_DIST] if d.exists()]
 STATIC_ROOT = DATA_DIR / "staticfiles"
 MEDIA_ROOT = DATA_DIR / "media"
+
+# ---- 文件存储 ----
+# 版本文件（升级包）默认存本地 MEDIA_ROOT；设置 IOT_MINIO_ENDPOINT 后改存 MinIO（S3 兼容对象存储）。
+MINIO = {
+    "ENDPOINT": os.getenv("IOT_MINIO_ENDPOINT", "").rstrip("/"),      # 如 http://minio:9000
+    "ACCESS_KEY": os.getenv("IOT_MINIO_ACCESS_KEY", ""),
+    "SECRET_KEY": os.getenv("IOT_MINIO_SECRET_KEY", ""),
+    "BUCKET": os.getenv("IOT_MINIO_BUCKET", "iot"),
+    "REGION": os.getenv("IOT_MINIO_REGION", "us-east-1"),
+    "PREFIX": os.getenv("IOT_MINIO_PREFIX", "").strip("/"),          # 可选：对象键前缀
+}
+PACKAGE_STORAGE_BACKEND = "minio" if MINIO["ENDPOINT"] else "local"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    "packages": (
+        {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {
+                "endpoint_url": MINIO["ENDPOINT"],
+                "access_key": MINIO["ACCESS_KEY"],
+                "secret_key": MINIO["SECRET_KEY"],
+                "bucket_name": MINIO["BUCKET"],
+                "region_name": MINIO["REGION"],
+                "location": MINIO["PREFIX"],
+                "addressing_style": "path",          # MinIO 使用路径风格：http://host:9000/<bucket>/<key>
+                "signature_version": "s3v4",
+                "file_overwrite": False,
+                "default_acl": None,
+                "querystring_auth": True,
+                "querystring_expire": 600,
+                "client_config": __import__("botocore.config", fromlist=["Config"]).Config(
+                    connect_timeout=5, read_timeout=120, retries={"max_attempts": 3, "mode": "standard"}),
+            },
+        }
+        if PACKAGE_STORAGE_BACKEND == "minio"
+        else {"BACKEND": "django.core.files.storage.FileSystemStorage"}
+    ),
+}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {

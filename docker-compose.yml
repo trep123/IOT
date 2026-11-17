@@ -1,6 +1,7 @@
-# 生产部署：web（Django + DRF + Channels + 前端）+ PostgreSQL。
+# 生产部署：web（Django + DRF + Channels + 前端）+ PostgreSQL + MinIO（版本文件存储，profile: minio）。
 # 变量来自同目录 .env（由 deploy/deploy.sh 生成，可手工修改后 docker compose up -d 生效）。
-# 数据库不映射宿主机端口，避免与宿主机已有的 5432 冲突。
+# 数据库与 MinIO API 不映射宿主机端口；MinIO 控制台只监听 127.0.0.1。
+# .env 中 COMPOSE_PROFILES=minio 时启动内置 MinIO；使用外部 MinIO 时留空并设置 IOT_MINIO_ENDPOINT。
 name: iot
 
 services:
@@ -19,6 +20,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  minio:
+    image: ${IOT_MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z}
+    profiles: ["minio"]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${IOT_MINIO_ACCESS_KEY:-admin}
+      MINIO_ROOT_PASSWORD: ${IOT_MINIO_SECRET_KEY:-}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:${IOT_MINIO_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - minio-data:/data
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
 
   web:
     build:
@@ -50,3 +68,4 @@ services:
 volumes:
   db-data:
   iot-data:
+  minio-data:

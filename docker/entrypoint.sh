@@ -21,6 +21,8 @@ PY
 fi
 
 python manage.py migrate --noinput
+# 版本文件存 MinIO 时：等待就绪、自动建桶，并把此前存在本地的升级包迁移过去
+python manage.py storage_init --sync-local
 python manage.py collectstatic --noinput -v0
 
 python manage.py shell <<'PY'

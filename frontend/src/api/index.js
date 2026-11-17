@@ -93,6 +93,7 @@ export const packages = {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (e) => onProgress && e.total && onProgress(Math.round((e.loaded / e.total) * 100)),
   }),
+  storage: () => g('upgrade-packages/storage/'),
   verify: (id) => p(`upgrade-packages/${id}/verify/`),
   remove: (id) => d(`upgrade-packages/${id}/`),
   download: (pkg) => download(`upgrade-packages/${pkg.package_id}/download/`, {}, pkg.file_name),

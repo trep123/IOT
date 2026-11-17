@@ -10,7 +10,9 @@
 - 管理端前端：Vue 3 + Vite + Element Plus 单页应用（`frontend/`），实时推送驱动页面刷新，设计见 [docs/frontend.md](docs/frontend.md)。
 - 设备接入：管理员**手动生成接入 Key**（单台 / 批量），设备用 HMAC-SHA256 签名建连上线（Key 不上网），
   支持重新生成、吊销与审计；管理端「帮助 → 设备接入指南」附 Python / C / C++ / Java 完整示例（`examples/device/`）。
-- 另有 Django Admin（`/admin/`）、可浏览 API（`/api/`）、设备模拟器与 29 个自动化测试。
+- 版本文件存储：上传的版本文件（升级包）存入 **MinIO**（S3 兼容，`django-storages`），一键部署自带 MinIO 容器，
+  也可接外部 MinIO；新建版本时可直接上传版本文件；设备经平台流式下载，无需直连 MinIO。
+- 另有 Django Admin（`/admin/`）、可浏览 API（`/api/`）、设备模拟器与 32 个自动化测试。
 
 ![运行总览](docs/screenshots/dashboard.png)
 
@@ -43,6 +45,7 @@ python simulator/device_sim.py --file data/demo_devices.json --fail-rate 0.2
 | **设备列表（组合筛选、在线统计）** | **关键指令（二次确认，结果实时回显）** |
 | ![设备列表](docs/screenshots/devices.png) | ![关键指令](docs/screenshots/critical-command.png) |
 | ![接入 Key](docs/screenshots/device-key.png) | ![设备接入指南](docs/screenshots/help-device-access.png) |
+| ![新建版本并上传版本文件](docs/screenshots/version-upload.png) | ![版本文件存 MinIO](docs/screenshots/versions-minio.png) |
 
 ## 目录结构
 
@@ -51,7 +54,7 @@ iot_platform/   settings / urls（DRF Router）/ asgi（HTTP + WebSocket）/ rou
 core/           时间源、版本号比较、分页、实时推送（Channel Layer）、调度器、管理命令
 devices/        设备档案、分组、在线状态判定、状态变更记录、设备网关（上行处理）、WebSocket Consumer
 control/        指令模板、单设备控制、批量控制（并发/离线策略/取消/重试）、超时
-firmware/       版本、升级包（SHA-256 + HMAC 签名）、升级任务（灰度/全量/熔断/回滚）、逐台升级记录
+firmware/       版本、升级包（SHA-256 + HMAC 签名，本地 / MinIO 存储）、升级任务（灰度/全量/熔断/回滚）、逐台升级记录
 audit/          操作审计
 frontend/       管理端（Vue 3 + Vite + Element Plus），构建产物 frontend/dist 由 Django 提供
 simulator/      设备端模拟器（签名上线 / 心跳 / 应答 / 升级代理）
@@ -93,7 +96,11 @@ docs/           设计文档、前端设计、API 文档、设备通信协议、
 | `IOT_PUBLIC_BASE_URL` | http://127.0.0.1:8000 | 下发给设备的升级包下载地址前缀 |
 | `IOT_DEVICE_AUTH_MAX_SKEW` | 300 | 设备签名时间戳允许偏差（秒） |
 | `IOT_DEVICE_AUTH_ALLOW_PLAIN` | 1 | 是否允许明文 Key（`?secret=`）接入，生产建议 0 |
-| `IOT_DATA_DIR` | ./data | SQLite 与升级包存储目录 |
+| `IOT_DATA_DIR` | ./data | SQLite 与（未启用 MinIO 时）升级包存储目录 |
+| `IOT_MINIO_ENDPOINT` | — | 设置后版本文件存 MinIO，如 `http://minio:9000` |
+| `IOT_MINIO_ACCESS_KEY` / `IOT_MINIO_SECRET_KEY` | — | MinIO 账号 / 密码 |
+| `IOT_MINIO_BUCKET` | iot | 存储桶（自动创建） |
+| `IOT_MINIO_PREFIX` | — | 可选：对象键前缀 |
 | `POSTGRES_DB` 等 | — | 设置后改用 PostgreSQL |
 | `REDIS_URL` | — | 设置后使用 Redis Channel Layer |
 | `DJANGO_SECRET_KEY` / `DJANGO_DEBUG` / `DJANGO_ALLOWED_HOSTS` | — | Django 基础配置 |
@@ -104,6 +111,8 @@ docs/           设计文档、前端设计、API 文档、设备通信协议、
 
 ```bash
 python -m pytest -q
+# MinIO 用例（可选）：指向一个可用的 MinIO
+IOT_TEST_MINIO_ENDPOINT=http://127.0.0.1:9000 IOT_TEST_MINIO_ACCESS_KEY=admin IOT_TEST_MINIO_SECRET_KEY=<密码> python -m pytest -q
 ```
 
 覆盖：设备上线/心跳超时/恢复与状态记录、筛选导出、参数校验、关键操作确认与审计、离线拒绝/排队、指令超时、
@@ -119,5 +128,6 @@ git clone https://github.com/trep123/IOT.git /opt/iot && cd /opt/iot
 sudo bash deploy/deploy.sh            # 国内网络加 --cn --image-mirror docker.m.daocloud.io/library/
 ```
 
-默认对外端口 8090（Nginx 反向代理，占用时自动顺延），容器只监听 127.0.0.1:18000，PostgreSQL 不映射宿主机端口。
+默认对外端口 8090（Nginx 反向代理，占用时自动顺延），容器只监听 127.0.0.1:18000，PostgreSQL 不映射宿主机端口；
+版本文件存内置 MinIO（`--minio-user` / `--minio-password` / `--minio-bucket` 指定账号与存储桶，`--minio-endpoint` 接外部 MinIO）。
 完成后打印访问地址与管理员密码。详见 [docs/deploy.md](docs/deploy.md)。

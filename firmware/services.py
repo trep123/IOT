@@ -15,6 +15,7 @@ from core.versioning import compare, model_matches
 from devices.filters import resolve_scope
 from devices.models import Device
 
+from . import storage
 from .models import DeviceUpgradeRecord, FirmwareVersion, UpgradePackage, UpgradeTask
 
 OpType = OperationLog.OpType
@@ -59,12 +60,38 @@ def create_package(version: FirmwareVersion, upload, package_type: str, base_ver
     pkg = UpgradePackage(version=version, package_type=package_type, base_version=base_version,
                          file_name=upload.name, size=size, checksum=checksum, signature=sign(checksum),
                          verified=True)
-    pkg.file_ref.save(upload.name, upload, save=False)
+    try:
+        pkg.file_ref.save(upload.name, upload, save=False)
+    except Exception as e:  # noqa: BLE001
+        raise Conflict(f"版本文件写入存储失败：{e}")
     pkg.save()
     record(operator, OpType.PACKAGE_UPLOAD, TargetType.PACKAGE, pkg.package_id,
            {"version_no": version.version_no, "type": package_type, "base_version": base_version,
-            "size": size, "checksum": checksum})
+            "size": size, "checksum": checksum, "storage": storage.location(pkg.file_ref.name)})
     return pkg
+
+
+def delete_package_file(pkg: UpgradePackage) -> None:
+    """删除升级包对应的文件 / 对象；存储暂不可用时不阻塞删除记录。"""
+    try:
+        if pkg.file_ref.name:
+            pkg.file_ref.delete(save=False)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def open_package_stream(pkg: UpgradePackage, chunk_size: int = 1 << 20):
+    """返回 (可迭代的数据块, 长度)。MinIO 直接流式转发，不落本地临时文件。"""
+    if storage.is_minio():
+        st = storage.package_storage()
+        obj = st.connection.meta.client.get_object(Bucket=st.bucket_name, Key=st._normalize_name(pkg.file_ref.name))
+        return obj["Body"].iter_chunks(chunk_size), obj["ContentLength"]
+    f = pkg.file_ref.open("rb")
+
+    def gen():
+        with f:
+            yield from iter(lambda: f.read(chunk_size), b"")
+    return gen(), pkg.file_ref.size
 
 
 def verify_package(pkg: UpgradePackage) -> dict:
@@ -72,7 +99,7 @@ def verify_package(pkg: UpgradePackage) -> dict:
     try:
         with pkg.file_ref.open("rb") as f:
             checksum, size = _sha256(f)
-    except FileNotFoundError:
+    except Exception:  # noqa: BLE001  文件缺失或对象存储不可达都视为校验失败
         checksum, size = "", 0
     ok_checksum = checksum == pkg.checksum and size == pkg.size
     ok_signature = hmac.compare_digest(sign(pkg.checksum), pkg.signature)

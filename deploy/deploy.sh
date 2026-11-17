@@ -3,11 +3,12 @@
 #  IoT 设备管理平台 · 一键部署（Ubuntu Server 22.04+ / 24.04 / 26.04）
 #
 #  做的事：安装 Docker → 获取代码 → 生成 .env（随机密钥/密码，重复执行会保留）
-#        → 构建镜像（前端 + 后端）→ 启动 web + PostgreSQL 容器
+#        → 构建镜像（前端 + 后端）→ 启动 web + PostgreSQL + MinIO（版本文件存储）容器
 #        → 配置宿主机 Nginx 反向代理（含 WebSocket）→ 放行防火墙端口 → 输出访问信息
 #
 #  端口：容器只监听 127.0.0.1:<APP_PORT>（默认 18000），对外由 Nginx 监听 <PORT>（默认 8090）；
-#        PostgreSQL 不映射宿主机端口。两个端口都会检测，被占用时自动顺延到空闲端口。
+#        PostgreSQL、MinIO API 不映射宿主机端口；MinIO 控制台只监听 127.0.0.1:<console>（默认 19001）。
+#        端口都会检测，被占用时自动顺延到空闲端口。
 #
 #  用法（root）：
 #    sudo bash deploy/deploy.sh                       # 在仓库目录内执行
@@ -24,6 +25,14 @@
 #    --branch main          拉取的分支
 #    --public-url URL       下发给设备的平台地址（默认 http://<本机IP>:<port> 或 http://<domain>）
 #    --uninstall            停止并删除容器（保留数据卷与 .env）
+#
+#  版本文件存储（MinIO）：
+#    --minio-user admin         MinIO 账号（默认 admin）
+#    --minio-password PWD       MinIO 密码（≥8 位；不填则沿用 .env，首次随机生成）
+#    --minio-bucket iot         存储桶（默认 iot，不存在时自动创建）
+#    --minio-endpoint URL       使用已有的外部 MinIO（如 http://10.0.0.5:9000），不再启动内置 MinIO 容器
+#    --minio-console-port 19001 内置 MinIO 控制台端口（仅监听 127.0.0.1）
+#    --no-minio                 版本文件改存容器数据卷（本地磁盘）
 # =============================================================================
 set -Eeuo pipefail
 
@@ -39,6 +48,13 @@ IMAGE_MIRROR=""
 INIT_DEMO=0
 PUBLIC_URL=""
 UNINSTALL=0
+MINIO_MODE=""          # builtin | external | none；空 = 沿用 .env，首次为 builtin
+MINIO_USER=""
+MINIO_PASSWORD=""
+MINIO_BUCKET=""
+MINIO_ENDPOINT=""
+MINIO_CONSOLE_PORT=""
+MINIO_IMAGE_DEFAULT="pgsty/minio:RELEASE.2026-08-04T00-00-00Z"   # MinIO 社区版构建（官方已停止发布 Docker 镜像）
 
 c_green='\033[32m'; c_yellow='\033[33m'; c_red='\033[31m'; c_cyan='\033[36m'; c_off='\033[0m'
 info()  { echo -e "${c_cyan}[IoT]${c_off} $*"; }
@@ -60,7 +76,13 @@ while [[ $# -gt 0 ]]; do
     --branch) BRANCH="$2"; shift 2 ;;
     --public-url) PUBLIC_URL="$2"; shift 2 ;;
     --uninstall) UNINSTALL=1; shift ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    --minio-user) MINIO_USER="$2"; shift 2 ;;
+    --minio-password) MINIO_PASSWORD="$2"; shift 2 ;;
+    --minio-bucket) MINIO_BUCKET="$2"; shift 2 ;;
+    --minio-endpoint) MINIO_ENDPOINT="$2"; MINIO_MODE=external; shift 2 ;;
+    --minio-console-port) MINIO_CONSOLE_PORT="$2"; shift 2 ;;
+    --no-minio) MINIO_MODE=none; shift ;;
+    -h|--help) sed -n '2,41p' "$0"; exit 0 ;;
     *) die "未知参数：$1（--help 查看用法）" ;;
   esac
 done
@@ -215,6 +237,39 @@ write_env() {
   [[ -z "$IMAGE_MIRROR" ]] && IMAGE_MIRROR="$(env_get IOT_IMAGE_MIRROR)"
   [[ -n "$IMAGE_MIRROR" && "$IMAGE_MIRROR" != */ ]] && IMAGE_MIRROR="$IMAGE_MIRROR/"
 
+  # ---- 版本文件存储（MinIO）----
+  local old_endpoint old_profiles minio_endpoint="" minio_image="" profiles=""
+  old_endpoint="$(env_get IOT_MINIO_ENDPOINT)"; old_profiles="$(env_get COMPOSE_PROFILES)"
+  if [[ -z "$MINIO_MODE" ]]; then
+    if [[ -f .env && -z "$old_endpoint" ]] && grep -q '^IOT_MINIO_ENDPOINT=' .env; then MINIO_MODE=none
+    elif [[ -n "$old_endpoint" && "$old_profiles" != *minio* ]]; then MINIO_MODE=external; MINIO_ENDPOINT="$old_endpoint"
+    else MINIO_MODE=builtin; fi
+  fi
+  [[ -n "$MINIO_USER" ]]     || MINIO_USER="$(env_get IOT_MINIO_ACCESS_KEY)";   [[ -n "$MINIO_USER" ]] || MINIO_USER=admin
+  [[ -n "$MINIO_PASSWORD" ]] || MINIO_PASSWORD="$(env_get IOT_MINIO_SECRET_KEY)"; [[ -n "$MINIO_PASSWORD" ]] || MINIO_PASSWORD="$(rand 20)"
+  [[ -n "$MINIO_BUCKET" ]]   || MINIO_BUCKET="$(env_get IOT_MINIO_BUCKET)";     [[ -n "$MINIO_BUCKET" ]] || MINIO_BUCKET=iot
+  case "$MINIO_MODE" in
+    builtin)
+      ((${#MINIO_PASSWORD} >= 8)) || die "MinIO 密码至少 8 位（--minio-password）"
+      profiles=minio
+      minio_endpoint="http://minio:9000"
+      minio_image="$(env_get IOT_MINIO_IMAGE)"
+      if [[ -z "$minio_image" ]]; then
+        minio_image="$MINIO_IMAGE_DEFAULT"
+        [[ -n "$IMAGE_MIRROR" ]] && minio_image="${IMAGE_MIRROR%library/}$minio_image"
+      fi
+      [[ -n "$MINIO_CONSOLE_PORT" ]] || MINIO_CONSOLE_PORT="$(env_get IOT_MINIO_CONSOLE_PORT)"
+      [[ -n "$MINIO_CONSOLE_PORT" ]] || MINIO_CONSOLE_PORT="$(pick_port 19001 "$APP_PORT" "$PUBLIC_PORT")"
+      ;;
+    external)
+      [[ -n "$MINIO_ENDPOINT" ]] || die "--minio-endpoint 不能为空"
+      minio_endpoint="${MINIO_ENDPOINT%/}"
+      curl -s -o /dev/null -m 5 "$minio_endpoint/minio/health/live" || warn "暂时无法访问 $minio_endpoint，请确认容器内可达"
+      ;;
+    none) minio_endpoint="" ;;
+  esac
+  MINIO_SUMMARY="$MINIO_MODE|$minio_endpoint|$MINIO_BUCKET|$MINIO_USER|${MINIO_CONSOLE_PORT:-}"
+
   local origins="$PUBLIC_URL"
   [[ "$PUBLIC_URL" == "http://$ip:$PUBLIC_PORT" ]] || origins="$origins,http://$ip:$PUBLIC_PORT"
   [[ -n "$DOMAIN" ]] && origins="$origins,https://$DOMAIN"
@@ -244,6 +299,15 @@ IOT_HEARTBEAT_MISS=3
 POSTGRES_DB=iot
 POSTGRES_USER=iot
 POSTGRES_PASSWORD=$pgpass
+# ---- 版本文件存储（MinIO）----
+# COMPOSE_PROFILES=minio 时随平台启动内置 MinIO；IOT_MINIO_ENDPOINT 为空时版本文件存容器数据卷
+COMPOSE_PROFILES=$profiles
+IOT_MINIO_IMAGE=$minio_image
+IOT_MINIO_ENDPOINT=$minio_endpoint
+IOT_MINIO_ACCESS_KEY=$MINIO_USER
+IOT_MINIO_SECRET_KEY=$MINIO_PASSWORD
+IOT_MINIO_BUCKET=$MINIO_BUCKET
+IOT_MINIO_CONSOLE_PORT=${MINIO_CONSOLE_PORT:-19001}
 # ---- 构建镜像源 ----
 IOT_IMAGE_MIRROR=$IMAGE_MIRROR
 PIP_INDEX_URL=$pip_index
@@ -356,7 +420,15 @@ summary() {
   echo "  管理端     $url/"
   echo "  管理员     admin / $ADMIN_PASSWORD   （首次创建时生效，记录在 .env 的 IOT_ADMIN_PASSWORD）"
   echo "  REST API   $url/api/        Django Admin  $url/admin/"
-  echo "  设备接入   ${url/http/ws}/ws/device/<设备编号>/?secret=<接入密钥>"
+  echo "  设备接入   ${url/http/ws}/ws/device/<设备编号>/?ts=…&nonce=…&sign=…   （见管理端「帮助 → 设备接入指南」）"
+  local m_mode m_ep m_bucket m_user m_console
+  IFS='|' read -r m_mode m_ep m_bucket m_user m_console <<<"${MINIO_SUMMARY:-none||||}"
+  case "$m_mode" in
+    builtin)  echo "  版本文件   MinIO（内置容器）存储桶 $m_bucket，账号 $m_user（密码见 .env 的 IOT_MINIO_SECRET_KEY）"
+              echo "             MinIO 控制台 http://127.0.0.1:$m_console （仅本机；远程用 ssh -L $m_console:127.0.0.1:$m_console 访问）" ;;
+    external) echo "  版本文件   MinIO $m_ep 存储桶 $m_bucket" ;;
+    *)        echo "  版本文件   容器数据卷（本地磁盘）" ;;
+  esac
   echo "  目录       $PROJECT_DIR   （.env 保存密钥，请妥善保管）"
   echo
   echo "  常用命令（在 $PROJECT_DIR 下）："

@@ -53,9 +53,10 @@
 | POST | `/api/firmware-versions/{id}/publish/` | DRAFT → RELEASABLE（需至少一个校验通过的全量包） |
 | POST | `/api/firmware-versions/{id}/deprecate/` | → DEPRECATED（无未结束任务时） |
 | POST | `/api/upgrade-packages/` | multipart 上传：`version_id`、`package_type`(FULL/DIFF)、`base_version`(差分必填)、`file`、可选 `checksum`（不一致则拒绝） |
-| GET/DELETE | `/api/upgrade-packages/`、`/{id}/` | 平台自动计算 SHA-256、大小，并以 HMAC-SHA256 签名 |
+| GET/DELETE | `/api/upgrade-packages/`、`/{id}/` | 平台自动计算 SHA-256、大小，并以 HMAC-SHA256 签名；返回 `storage_location`（如 `minio://iot/packages/1.2.0/…`）；删除时同时删除文件 |
+| GET | `/api/upgrade-packages/storage/` | 版本文件存储状态：`backend`(minio/local)、`endpoint`、`bucket`、`reachable`、`error`、`package_count`、`total_size` |
 | POST | `/api/upgrade-packages/{id}/verify/` | 重新校验文件完整性与签名 |
-| GET | `/api/upgrade-packages/{id}/download/` | 下载（管理端 Token，或设备 `device_id` + `ts`/`nonce`/`sign` 签名，兼容 `secret`） |
+| GET | `/api/upgrade-packages/{id}/download/` | 下载（管理端 Token，或设备 `device_id` + `ts`/`nonce`/`sign` 签名，兼容 `secret`）；文件存 MinIO 时由平台流式转发，带 `Content-Length`、`X-Checksum-Sha256` |
 | POST | `/api/upgrade-tasks/` | 创建任务：`version_id`、`target_scope`、`gray_ratio`、`gray_device_ids`、`failure_threshold`、`start` |
 | GET | `/api/upgrade-tasks/`、`/{id}/` | 含 `stats`（总数、成功、失败、阶段分布、灰度统计、失败率）与 `excluded`（自动排除的设备及原因） |
 | GET | `/api/upgrade-tasks/{id}/records/` | 逐台升级记录 |

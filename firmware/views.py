@@ -1,5 +1,7 @@
+from urllib.parse import quote
+
 from django.db.models.deletion import ProtectedError
-from django.http import FileResponse
+from django.http import Http404, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -34,10 +36,13 @@ class FirmwareVersionViewSet(OperatorContextMixin, viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if instance.status != FirmwareVersion.Status.DRAFT:
             raise Conflict("只有草稿版本可以删除。")
+        pkgs = list(instance.packages.all())
         try:
             instance.delete()
         except ProtectedError:
             raise Conflict("版本已被升级任务引用，不能删除。")
+        for pkg in pkgs:
+            services.delete_package_file(pkg)
 
     @action(detail=True, methods=["post"])
     def publish(self, request, pk=None):
@@ -66,8 +71,17 @@ class UpgradePackageViewSet(OperatorContextMixin, mixins.CreateModelMixin, mixin
     def perform_destroy(self, instance):
         if instance.version.status != FirmwareVersion.Status.DRAFT:
             raise Conflict("只有草稿版本的升级包可以删除。")
-        instance.file_ref.delete(save=False)
+        services.delete_package_file(instance)
         instance.delete()
+
+    @action(detail=False, methods=["get"])
+    def storage(self, request):
+        """版本文件存储状态：后端（本地 / MinIO）、存储桶、连通性、文件数与总大小。"""
+        from django.db.models import Count, Sum
+
+        from .storage import status as storage_status
+        agg = UpgradePackage.objects.aggregate(count=Count("package_id"), total_size=Sum("size"))
+        return Response({**storage_status(), "package_count": agg["count"], "total_size": agg["total_size"] or 0})
 
     @action(detail=True, methods=["post"])
     def verify(self, request, pk=None):
@@ -76,7 +90,13 @@ class UpgradePackageViewSet(OperatorContextMixin, mixins.CreateModelMixin, mixin
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
         pkg = self.get_object()
-        resp = FileResponse(pkg.file_ref.open("rb"), as_attachment=True, filename=pkg.file_name)
+        try:
+            chunks, length = services.open_package_stream(pkg)
+        except Exception:  # noqa: BLE001
+            raise Http404("版本文件不存在或存储不可用。")
+        resp = StreamingHttpResponse(chunks, content_type="application/octet-stream")
+        resp["Content-Length"] = str(length)
+        resp["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(pkg.file_name)}"
         resp["X-Checksum-Sha256"] = pkg.checksum
         resp["X-Signature"] = pkg.signature
         return resp

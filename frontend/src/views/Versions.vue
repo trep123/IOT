@@ -2,8 +2,18 @@
   <div class="page">
     <div class="page-head">
       <div><h2>版本与升级包</h2><p>草稿 → 上传并校验全量包 → 发布为可发布 → 用于升级任务；不再使用时废弃</p></div>
-      <el-button type="primary" :icon="'Plus'" @click="openVersion()">新建版本</el-button>
+      <div class="head-actions">
+        <el-tooltip v-if="store" placement="bottom" :content="storeTip">
+          <el-tag :type="store.reachable ? 'success' : 'danger'" effect="plain" size="large" class="store-tag">
+            <el-icon><Coin /></el-icon> 版本文件存储：{{ store.backend_display }}<template v-if="store.bucket"> · {{ store.bucket }}</template>
+            · {{ store.reachable ? `${store.package_count} 个文件 / ${fmtSize(store.total_size)}` : '不可用' }}
+          </el-tag>
+        </el-tooltip>
+        <el-button type="primary" :icon="'Plus'" @click="openVersion()">新建版本</el-button>
+      </div>
     </div>
+    <el-alert v-if="store && !store.reachable" type="error" show-icon :closable="false" class="store-alert"
+      :title="`对象存储 ${store.endpoint} 不可用，版本文件暂时无法上传和下载`" :description="store.error" />
     <div class="card">
       <div class="toolbar">
         <el-input v-model="filters.search" placeholder="版本号 / 说明" clearable :prefix-icon="'Search'" @keyup.enter="search" @clear="search" />
@@ -22,15 +32,16 @@
                 <el-table-column prop="package_id" label="ID" width="70" />
                 <el-table-column label="类型" width="160"><template #default="{ row: p }"><DictTag :dict="PACKAGE_TYPE" :value="p.package_type" /><span v-if="p.base_version" class="mono muted"> 自 {{ p.base_version }}</span></template></el-table-column>
                 <el-table-column prop="file_name" label="文件" min-width="160" show-overflow-tooltip />
-                <el-table-column label="大小" width="90"><template #default="{ row: p }">{{ fmtSize(p.size) }}</template></el-table-column>
-                <el-table-column label="SHA-256" min-width="200"><template #default="{ row: p }"><el-tooltip :content="p.checksum"><span class="mono">{{ p.checksum?.slice(0, 16) }}…</span></el-tooltip></template></el-table-column>
-                <el-table-column label="签名校验" width="100"><template #default="{ row: p }"><el-tag :type="p.verified ? 'success' : 'danger'" size="small">{{ p.verified ? '通过' : '未通过' }}</el-tag></template></el-table-column>
-                <el-table-column label="上传时间" width="170"><template #default="{ row: p }">{{ fmtTime(p.created_at) }}</template></el-table-column>
                 <el-table-column label="操作" width="180"><template #default="{ row: p }">
                   <el-button link type="primary" @click="verify(row, p)">重新校验</el-button>
                   <el-button link type="primary" @click="pkgApi.download(p)">下载</el-button>
                   <el-popconfirm title="删除该升级包？" @confirm="removePkg(row, p)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
                 </template></el-table-column>
+                <el-table-column label="存储位置" min-width="200" show-overflow-tooltip><template #default="{ row: p }"><span class="mono">{{ p.storage_location || '—' }}</span></template></el-table-column>
+                <el-table-column label="大小" width="90"><template #default="{ row: p }">{{ fmtSize(p.size) }}</template></el-table-column>
+                <el-table-column label="SHA-256" min-width="150"><template #default="{ row: p }"><el-tooltip :content="p.checksum"><span class="mono">{{ p.checksum?.slice(0, 16) }}…</span></el-tooltip></template></el-table-column>
+                <el-table-column label="签名校验" width="100"><template #default="{ row: p }"><el-tag :type="p.verified ? 'success' : 'danger'" size="small">{{ p.verified ? '通过' : '未通过' }}</el-tag></template></el-table-column>
+                <el-table-column label="上传时间" width="170"><template #default="{ row: p }">{{ fmtTime(p.created_at) }}</template></el-table-column>
               </el-table>
             </div>
           </template>
@@ -52,13 +63,13 @@
           <el-button link type="primary" :disabled="row.status === 'DEPRECATED'" @click="openUpload(row)">上传包</el-button>
           <el-button link type="primary" @click="openVersion(row)">编辑</el-button>
           <el-popconfirm v-if="row.status === 'RELEASABLE'" title="废弃后不能再用于新的升级任务，确认？" width="240" @confirm="deprecate(row)"><template #reference><el-button link type="warning">废弃</el-button></template></el-popconfirm>
-          <el-popconfirm v-if="row.status === 'DRAFT'" title="删除草稿版本？" @confirm="removeVersion(row)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
+          <el-popconfirm v-if="row.status === 'DRAFT'" title="删除草稿版本？" @confirm="removeVersionAndStore(row)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
         </template></el-table-column>
       </el-table>
       <div class="pager"><el-pagination v-model:current-page="page" v-model:page-size="size" :total="total" layout="total, prev, pager, next" @change="load" /></div>
     </div>
 
-    <el-dialog v-model="vDlg" :title="vForm.version_id ? `编辑版本 ${vForm.version_no}` : '新建版本'" width="560px">
+    <el-dialog v-model="vDlg" :title="vForm.version_id ? `编辑版本 ${vForm.version_no}` : '新建版本'" width="560px" @closed="vFile = null">
       <el-form :model="vForm" label-width="100px">
         <el-form-item label="版本号" required><el-input v-model="vForm.version_no" :disabled="vForm.version_id && vForm.status !== 'DRAFT'" placeholder="如 1.2.0" /></el-form-item>
         <el-form-item label="适用型号" required>
@@ -68,8 +79,16 @@
         </el-form-item>
         <el-form-item label="最低可升级"><el-input v-model="vForm.min_upgradable_version" placeholder="低于该版本的设备不能直接升级，留空不限" /></el-form-item>
         <el-form-item label="更新说明"><el-input v-model="vForm.release_notes" type="textarea" :rows="4" /></el-form-item>
+        <el-form-item v-if="!vForm.version_id" label="版本文件">
+          <el-upload drag :auto-upload="false" :limit="1" :on-change="(f) => (vFile = f.raw)" :on-remove="() => (vFile = null)" style="width: 100%">
+            <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+            <div class="el-upload__text">拖拽全量包到这里，或 <em>点击选择</em></div>
+            <template #tip><div class="form-tip">可选：保存版本时一并上传为全量包（存入{{ store?.backend_display || '存储' }}），差分包可稍后在「上传包」中添加</div></template>
+          </el-upload>
+        </el-form-item>
+        <el-progress v-if="vUploading" :percentage="uProgress" />
       </el-form>
-      <template #footer><el-button @click="vDlg = false">取消</el-button><el-button type="primary" @click="saveVersion">保存</el-button></template>
+      <template #footer><el-button @click="vDlg = false">取消</el-button><el-button type="primary" :loading="vUploading" @click="saveVersion">{{ vFile ? '保存并上传' : '保存' }}</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="uDlg" :title="`上传升级包 · ${uVersion?.version_no}`" width="560px" @closed="uFile = null">
@@ -86,6 +105,7 @@
           <el-upload drag :auto-upload="false" :limit="1" :on-change="(f) => (uFile = f.raw)" :on-remove="() => (uFile = null)" style="width: 100%">
             <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
             <div class="el-upload__text">拖拽文件到这里，或 <em>点击选择</em></div>
+            <template #tip><div class="form-tip">上传后平台计算 SHA-256 并签名，文件存入{{ store?.backend_display || '存储' }}<template v-if="store?.bucket">（存储桶 {{ store.bucket }}）</template></div></template>
           </el-upload>
         </el-form-item>
         <el-form-item label="SHA-256">
@@ -99,7 +119,7 @@
   </div>
 </template>
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { devices, packages as pkgApi, versions } from '@/api'
 import { PACKAGE_TYPE, VERSION, options } from '@/utils/dict'
@@ -125,10 +145,33 @@ function openVersion(row) {
   Object.assign(vForm, row ? { ...row, applicable_models: [...row.applicable_models] } : { version_id: null, version_no: '', applicable_models: [], min_upgradable_version: '', release_notes: '', status: 'DRAFT' })
   vDlg.value = true
 }
+const vFile = ref(null)
+const vUploading = ref(false)
 async function saveVersion() {
   const data = { version_no: vForm.version_no, applicable_models: vForm.applicable_models, min_upgradable_version: vForm.min_upgradable_version, release_notes: vForm.release_notes }
-  if (vForm.version_id) await versions.update(vForm.version_id, data); else await versions.create(data)
-  ElMessage.success('已保存'); vDlg.value = false; load()
+  if (vForm.version_id) {
+    await versions.update(vForm.version_id, data)
+    ElMessage.success('已保存'); vDlg.value = false; load(); return
+  }
+  const v = await versions.create(data)
+  vForm.version_id = v.version_id   // 上传失败时再次点击只会重试上传，不会重复建版本
+  if (vFile.value) {
+    vUploading.value = true; uProgress.value = 0
+    try {
+      const fd = new FormData()
+      fd.append('version_id', v.version_id)
+      fd.append('package_type', 'FULL')
+      fd.append('file', vFile.value)
+      const p = await pkgApi.upload(fd, (x) => (uProgress.value = x))
+      ElMessage.success(`版本 ${v.version_no} 已创建，版本文件已上传（${p.storage_location}）`)
+    } catch {
+      vDlg.value = false; load(); loadStore()
+      return ElMessage.warning(`版本 ${v.version_no} 已创建，但版本文件上传失败，请在列表中点「上传包」重试`)
+    } finally { vUploading.value = false }
+  } else {
+    ElMessage.success('已保存')
+  }
+  vDlg.value = false; load(); loadStore()
 }
 async function publish(row) {
   await ElMessageBox.confirm(`发布版本 ${row.version_no}？发布后可用于创建升级任务，版本号不可再改。`, '发布版本', { type: 'info' })
@@ -166,14 +209,24 @@ async function upload() {
     const p = await pkgApi.upload(fd, (v) => (uProgress.value = v))
     ElMessage.success(`上传成功，签名校验${p.verified ? '通过' : '未通过'}`)
     uDlg.value = false
-    await load(); loadPkgs(uVersion.value)
+    await load(); loadPkgs(uVersion.value); loadStore()
   } finally { uploading.value = false }
 }
 async function verify(v, p) { const r = await pkgApi.verify(p.package_id); ElMessage[r.verified ? 'success' : 'error'](r.verified ? '校验通过' : '校验未通过'); loadPkgs(v); load() }
-async function removePkg(v, p) { await pkgApi.remove(p.package_id); ElMessage.success('已删除'); loadPkgs(v); load() }
+async function removePkg(v, p) { await pkgApi.remove(p.package_id); ElMessage.success('已删除'); loadPkgs(v); load(); loadStore() }
+async function removeVersionAndStore(row) { await removeVersion(row); loadStore() }
+
+const store = ref(null)
+const storeTip = computed(() => {
+  const s = store.value
+  if (!s) return ''
+  return s.backend === 'minio' ? `MinIO ${s.endpoint}，存储桶 ${s.bucket}；设备经平台下载，无需直连 MinIO` : `本地目录 ${s.location}`
+})
+async function loadStore() { try { store.value = await pkgApi.storage() } catch { store.value = null } }
 
 onMounted(async () => {
   load()
+  loadStore()
   const s = await devices.summary()
   models.value = s.by_model.map((m) => m.model)
   deviceVersions.value = s.by_version.map((v) => v.current_version).filter(Boolean)
@@ -181,4 +234,7 @@ onMounted(async () => {
 </script>
 <style scoped>
 .pkgs { padding: 4px 48px 12px; }
+.head-actions { display: flex; align-items: center; gap: 12px; }
+.store-tag { gap: 4px; }
+.store-alert { margin-bottom: 16px; }
 </style>

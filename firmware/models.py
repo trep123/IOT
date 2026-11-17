@@ -3,6 +3,8 @@ from django.db import models
 from core import timeutil
 from devices.models import Device
 
+from .storage import package_storage
+
 
 class FirmwareVersion(models.Model):
     class Status(models.TextChoices):
@@ -41,7 +43,7 @@ class UpgradePackage(models.Model):
                                 db_column="version_id")
     package_type = models.CharField(max_length=8, choices=PackageType.choices)
     base_version = models.CharField(max_length=32, blank=True, default="", help_text="差分包的起始版本")
-    file_ref = models.FileField(upload_to=package_upload_to, max_length=255)
+    file_ref = models.FileField(upload_to=package_upload_to, storage=package_storage, max_length=255)
     file_name = models.CharField(max_length=255)
     size = models.BigIntegerField(default=0)
     checksum = models.CharField(max_length=64, help_text="SHA-256")
