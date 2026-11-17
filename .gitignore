@@ -6,3 +6,4 @@ data/
 .venv/
 staticfiles/
 media/
+.env

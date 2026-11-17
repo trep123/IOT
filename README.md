@@ -15,7 +15,7 @@
 ## 快速开始
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 python manage.py migrate
 python manage.py init_demo            # 管理员 admin/admin123、10 台设备、指令模板、1.0.0 与 1.1.0 两个版本
 (cd frontend && npm install && npm run build)   # 构建管理端（需要 Node 18+）
@@ -105,9 +105,12 @@ python -m pytest -q
 
 更多：[前端设计](docs/frontend.md) · [API 文档](docs/api.md) · [设备通信协议](docs/protocol.md) · [设计文档](docs/design.md)
 
-## Docker
+## 部署（Docker 一键部署）
 
 ```bash
-docker compose up --build    # 镜像构建时自动编译前端；访问 http://localhost:8000
-docker compose exec web python manage.py init_demo
+git clone https://github.com/trep123/IOT.git /opt/iot && cd /opt/iot
+sudo bash deploy/deploy.sh            # 国内网络加 --cn --image-mirror docker.m.daocloud.io/library/
 ```
+
+默认对外端口 8090（Nginx 反向代理，占用时自动顺延），容器只监听 127.0.0.1:18000，PostgreSQL 不映射宿主机端口。
+完成后打印访问地址与管理员密码。详见 [docs/deploy.md](docs/deploy.md)。

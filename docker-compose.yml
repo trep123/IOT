@@ -1,12 +1,52 @@
+# 生产部署：web（Django + DRF + Channels + 前端）+ PostgreSQL。
+# 变量来自同目录 .env（由 deploy/deploy.sh 生成，可手工修改后 docker compose up -d 生效）。
+# 数据库不映射宿主机端口，避免与宿主机已有的 5432 冲突。
+name: iot
+
 services:
-  web:
-    build: .
-    ports: ["8000:8000"]
+  db:
+    image: ${IOT_IMAGE_MIRROR:-}postgres:16-alpine
+    restart: unless-stopped
     environment:
-      DJANGO_DEBUG: "0"
-      DJANGO_SECRET_KEY: change-me
-      IOT_SIGN_KEY: change-me
-      IOT_PUBLIC_BASE_URL: http://localhost:8000
-    volumes: ["iot-data:/data"]
+      POSTGRES_DB: ${POSTGRES_DB:-iot}
+      POSTGRES_USER: ${POSTGRES_USER:-iot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build:
+      context: .
+      args:
+        NODE_IMAGE: ${IOT_IMAGE_MIRROR:-}node:20-alpine
+        PY_IMAGE: ${IOT_IMAGE_MIRROR:-}python:3.12-slim
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+    image: iot-platform:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      IOT_DATA_DIR: /data
+    ports:
+      # 默认只监听本机，由宿主机 Nginx 反向代理；不用 Nginx 时 IOT_BIND=0.0.0.0
+      - "${IOT_BIND:-127.0.0.1}:${IOT_APP_PORT:-18000}:8000"
+    volumes:
+      - iot-data:/data
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
 volumes:
+  db-data:
   iot-data:
